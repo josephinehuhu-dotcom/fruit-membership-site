@@ -138,6 +138,11 @@ function passwordInput() {
     `minlength="10" maxlength="128" autocomplete="${mode === "login" ? "current-password" : "new-password"}"`,
   );
 }
+function loadingView(
+  message = admin ? "正在加载管理数据" : "正在加载领取信息",
+) {
+  app.innerHTML = `<section class="card auth loading" role="status" aria-live="polite" aria-busy="true"><div class="spinner" aria-hidden="true"></div><h1>${esc(message)}</h1><p>请稍候，数据正在安全同步…</p><div class="skeleton"><i></i><i></i><i></i></div></section>`;
+}
 function authView(setup = false) {
   app.innerHTML = `<section class="card auth"><div class="eyebrow">${admin ? "管理工作台" : "会员水果福利"}</div><h1>${setup ? "初始化管理员" : mode === "activate" ? "激活会员账号" : admin ? "管理员登录" : "会员登录"}</h1><p class="small">${setup ? "仅首次部署需要初始化密钥。" : mode === "activate" ? "请使用管理员私下提供的激活码设置密码。" : "使用会员手机号和密码登录。"}</p><form id="auth">${setup ? input("token", "初始化密钥", "password", 'autocomplete="off"') + input("name", "管理员姓名") : ""}${input("phone", "手机号", "tel", 'pattern="1[3-9][0-9]{9}" maxlength="11" autocomplete="username" inputmode="numeric"')}${mode === "activate" ? input("code", "一次性激活码", "text", 'autocomplete="off" maxlength="32"') : ""}${passwordInput()}${setup || mode === "activate" ? input("repeat", "再次输入密码", "password", 'autocomplete="new-password"') : ""}${!admin ? '<label><input type="checkbox" id="remember" checked>在我的手机上保持登录 30 天</label>' : ""}<p id="error" class="error" role="alert" hidden></p><button class="primary" type="submit">${setup ? "创建管理员" : mode === "activate" ? "激活并登录" : "登录"}</button></form>${!admin ? `<button id="switch" style="width:100%;margin-top:12px">${mode === "login" ? "首次使用 / 重置后激活" : "已有密码，返回登录"}</button><p class="muted">忘记密码？请联系管理员核实身份后重新获取激活码。</p>` : '<p class="muted">仅授权管理员可访问领取数据。</p>'}</section>`;
   if (!admin)
@@ -183,6 +188,7 @@ async function boot() {
       }
       return;
     }
+    loadingView();
     const results = await Promise.all([
       api("me"),
       admin ? api("admin/data" + (month ? "?month=" + month : "")) : null,
@@ -345,7 +351,11 @@ function adminView() {
       boot();
     }
   };
-  document.querySelector("#refresh").onclick = boot;
+  document.querySelector("#refresh").onclick = (e) => {
+    e.target.disabled = true;
+    e.target.textContent = "正在刷新…";
+    boot();
+  };
   document.querySelector("#cleanup").onclick = async () => {
     if (month >= me.month) {
       error(new Error("只能清理已经结束的月份"));

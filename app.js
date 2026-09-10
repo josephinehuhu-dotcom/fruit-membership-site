@@ -23,15 +23,18 @@ let me = null,
   receipt = null,
   requestId = null,
   credentials = [];
-const SESSION_KEY = "fruit-membership-session-v2";
+const MEMBER_SESSION_KEY = "fruit-membership-session-v2";
+const ADMIN_SESSION_KEY = "fruit-membership-admin-session-v1";
+const sessionKey = () => (admin ? ADMIN_SESSION_KEY : MEMBER_SESSION_KEY);
 function clearSession() {
-  localStorage.removeItem(SESSION_KEY);
-  sessionStorage.removeItem(SESSION_KEY);
+  localStorage.removeItem(sessionKey());
+  sessionStorage.removeItem(sessionKey());
 }
 function accessToken() {
   try {
     const raw =
-      sessionStorage.getItem(SESSION_KEY) || localStorage.getItem(SESSION_KEY);
+      sessionStorage.getItem(sessionKey()) ||
+      localStorage.getItem(sessionKey());
     if (!raw) return "";
     const saved = JSON.parse(raw);
     if (saved.expiresAt <= Date.now() / 1000) {
@@ -86,11 +89,21 @@ async function api(path, body) {
     throw e;
   }
   if (d.token) {
+    if (admin && d.role !== "admin") {
+      const e = new Error("此账号没有管理权限，请使用管理员账号登录");
+      e.status = 403;
+      throw e;
+    }
+    if (!admin && d.role === "admin") {
+      const e = new Error("这是管理员账号，请从管理后台登录");
+      e.status = 403;
+      throw e;
+    }
     clearSession();
     const storage =
       d.role === "member" && body?.remember ? localStorage : sessionStorage;
     storage.setItem(
-      SESSION_KEY,
+      d.role === "admin" ? ADMIN_SESSION_KEY : MEMBER_SESSION_KEY,
       JSON.stringify({ token: d.token, expiresAt: d.expiresAt }),
     );
   }
@@ -219,6 +232,11 @@ async function boot() {
           app.innerHTML =
             '<section class="card auth"><h2>等待初始化</h2><p>请先配置服务器初始化密钥 SETUP_TOKEN。</p></section>';
       } else authView();
+    } else if (e.status === 403 && admin) {
+      clearSession();
+      mode = "login";
+      authView();
+      error(new Error("当前登录不是管理员身份，请重新登录管理员账号"));
     } else {
       app.innerHTML =
         '<section class="card auth"><h2>暂时无法连接服务</h2><p id="error" class="error"></p><button id="retry">重试</button></section>';
@@ -334,7 +352,7 @@ function adminView() {
     )
     .join(
       "",
-    )}</div><section class="card"><details id="importDetails"><summary>＋ 添加 / 批量导入会员</summary><p class="small">每行“姓名,手机号”，最多 500 人；也可上传包含“姓名,手机号”表头的 CSV 文件。已有手机号会跳过。激活码有效期为 7 天，请私下发给对应会员。</p><label for="csvFile">上传 CSV 文件</label><input type="file" id="csvFile" accept=".csv,text/csv"><label for="imports">会员名单</label><textarea id="imports" placeholder="张三,13800138000&#10;李四,13900139000"></textarea><button id="import">导入并生成激活码</button></details><div id="codes"></div><p id="error" class="error" role="alert" hidden></p><div class="row"><div class="tabs"><button data-tab="members" class="${tab === "members" ? "active" : ""}">会员领取情况</button><button data-tab="records" class="${tab === "records" ? "active" : ""}">领取明细</button></div><input id="month" type="month" value="${month}" aria-label="统计月份" style="width:170px"></div><div class="toolbar"><input id="search" placeholder="搜索姓名或手机号" value="${esc(search)}"><select id="filter"><option value="all">全部会员</option><option value="full">已达上限</option><option value="available">仍有额度</option><option value="inactive">待激活</option></select><button id="refresh">刷新数据</button><button id="cleanup">清理历史月份</button></div><div id="results">${tableView()}</div><p class="muted">领取次数由服务端校验。撤销记录保留在导出文件中，统计时只计算有效记录。</p></section>`;
+    )}</div><section class="card"><details id="importDetails"><summary>＋ 给会员开通资格 / 批量导入</summary><p class="small"><strong>导入姓名和手机号后，该会员才有注册资格。</strong>系统会为每位新会员生成一个有效期 7 天的一次性激活码。激活码只在导入成功后显示一次，请立即点击“下载激活码 CSV”保存，再私下发给对应会员。</p><p class="small">每行“姓名,手机号”，最多 500 人；也可上传包含“姓名,手机号”表头的 CSV 文件。已有手机号会跳过，如需为已有会员生成新激活码，请在会员列表点击“重置激活码”。</p><label for="csvFile">上传 CSV 文件</label><input type="file" id="csvFile" accept=".csv,text/csv"><label for="imports">会员名单</label><textarea id="imports" placeholder="张三,13800138000&#10;李四,13900139000"></textarea><button id="import">导入并生成激活码</button></details><div id="codes"></div><p id="error" class="error" role="alert" hidden></p><div class="row"><div class="tabs"><button data-tab="members" class="${tab === "members" ? "active" : ""}">会员领取情况</button><button data-tab="records" class="${tab === "records" ? "active" : ""}">领取明细</button></div><input id="month" type="month" value="${month}" aria-label="统计月份" style="width:170px"></div><div class="toolbar"><input id="search" placeholder="搜索姓名或手机号" value="${esc(search)}"><select id="filter"><option value="all">全部会员</option><option value="full">已达上限</option><option value="available">仍有额度</option><option value="inactive">待激活</option></select><button id="refresh">刷新数据</button><button id="cleanup">清理历史月份</button></div><div id="results">${tableView()}</div><p class="muted">领取次数由服务端校验。撤销记录保留在导出文件中，统计时只计算有效记录。</p></section>`;
   bindLogout();
   document.querySelector("#filter").value = filter;
   document.querySelector("#filter").onchange = (e) => {

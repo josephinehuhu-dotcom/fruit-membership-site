@@ -440,9 +440,15 @@
     <div class="brand">◒ 鲜享<span>会员</span></div>
     <span class="muted" id="pageLabel">管理员工作台</span>
   </header>
-  <main id="app"></main>
+  <main id="app">
+    <section class="card auth" role="status" aria-live="polite">
+      <h1>欢迎来到鲜享</h1>
+      <p>正在加载管理工作台，请稍候…</p>
+      <p class="muted">首次连接可能需要几秒钟。</p>
+    </section>
+  </main>
   <footer>鲜享会员 · 每月四份新鲜心意</footer>
-  <script src="config.js"></script>
-  <script src="qrcode.js"></script>
-  <script src="app.js"></script>
+  <script defer src="config.js?v=20260910b"></script>
+  <script defer src="qrcode.js"></script>
+  <script defer src="app.js?v=20260910b"></script>
 </html>

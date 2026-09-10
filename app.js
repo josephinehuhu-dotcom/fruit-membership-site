@@ -63,13 +63,21 @@ function requestHeaders(body) {
   return headers;
 }
 async function api(path, body) {
-  const r = await fetch(apiURL(path), {
-    method: body === undefined ? "GET" : "POST",
-    credentials: window.FRUIT_CONFIG?.apiBase ? "omit" : "same-origin",
-    headers: requestHeaders(body),
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const d = await r.json();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 25000);
+  let r, d;
+  try {
+    r = await fetch(apiURL(path), {
+      signal: controller.signal,
+      method: body === undefined ? "GET" : "POST",
+      credentials: window.FRUIT_CONFIG?.apiBase ? "omit" : "same-origin",
+      headers: requestHeaders(body),
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    d = await r.json();
+  } finally {
+    clearTimeout(timeout);
+  }
   if (!r.ok) {
     if (r.status === 401 && path !== "login" && path !== "activate")
       clearSession();
@@ -113,7 +121,9 @@ async function exportMonth() {
 function error(e) {
   const el = document.querySelector("#error");
   if (el) {
-    el.textContent = e.message;
+    el.textContent = ["TimeoutError", "AbortError"].includes(e.name)
+      ? "连接超时，请检查网络后重试。"
+      : e.message;
     el.hidden = false;
   } else alert(e.message);
 }
@@ -139,6 +149,8 @@ function authView(setup = false) {
     e.preventDefault();
     const b = e.target.querySelector("button");
     b.disabled = true;
+    const originalLabel = b.textContent;
+    b.textContent = "正在验证，请稍候…";
     document.querySelector("#error").hidden = true;
     try {
       const f = Object.fromEntries(new FormData(e.target));
@@ -157,12 +169,25 @@ function authView(setup = false) {
       error(e);
     } finally {
       b.disabled = false;
+      b.textContent = originalLabel;
     }
   };
 }
 async function boot() {
   try {
-    me = await api("me");
+    if (window.FRUIT_CONFIG?.apiBase && !accessToken()) {
+      authView();
+      if (admin) {
+        const status = await api("status");
+        if (!status.initialized && status.setupAvailable) authView(true);
+      }
+      return;
+    }
+    const results = await Promise.all([
+      api("me"),
+      admin ? api("admin/data" + (month ? "?month=" + month : "")) : null,
+    ]);
+    me = results[0];
     month = month || me.month;
     if (admin && me.user.role !== "admin") {
       app.innerHTML =
@@ -171,7 +196,7 @@ async function boot() {
       return;
     }
     if (admin) {
-      data = await api("admin/data?month=" + month);
+      data = results[1];
       adminView();
     } else if (me.user.role === "admin") {
       app.innerHTML =
@@ -180,7 +205,7 @@ async function boot() {
     } else claimView();
   } catch (e) {
     if (e.status === 401) {
-      const status = await api("status");
+      const status = admin ? await api("status") : { initialized: true };
       if (admin && !status.initialized) {
         if (status.setupAvailable) {
           authView(true);
@@ -213,12 +238,25 @@ function bindLogout() {
 }
 function claimView() {
   const n = me.count;
-  app.innerHTML = `<div class="grid"><section class="card hero"><div class="eyebrow">FRESH MOMENTS / 每月会员福利</div><h1>把新鲜，<br>带回日常。</h1><p>每月四份时令水果，<br>为生活添一点自然的甜。</p><span class="fruit">🍐🍊</span></section><section class="card"><div class="row"><h2>${esc(me.user.name)}，你好</h2><button id="logout">退出</button></div><span class="muted phone">${esc(me.user.phone)}</span><div class="quota"><div><strong>${n}</strong><small> / 4 份已领取</small></div><span class="pill ${n >= 4 ? "full" : ""}">${me.month} · ${n >= 4 ? "已领满" : `剩余 ${4 - n} 份`}</span></div><div class="dots">${Array.from({ length: 4 }, (_, i) => `<i class="${i < n ? "used" : ""}"></i>`).join("")}</div>${receipt ? `<div class="receipt" role="status"><h2>领取登记成功 ✓</h2><b>${esc(me.user.name)} · 1 份</b><p>${date(receipt.at)}</p><span class="small">凭证编号：${esc(receipt.id)}</span><p class="muted">请向现场工作人员出示本次凭证。</p></div>` : ""}<p id="error" class="error" role="alert" hidden></p><button id="claim" class="primary" ${n >= 4 ? "disabled" : ""}>${n >= 4 ? "本月额度已用完" : "登记领取一份"}</button><p class="muted">到店领取时提交。按北京时间自然月统计，每月 1 日获得新额度。</p><div class="history"><h2>本月领取记录</h2>${me.records.map((r) => `<div><span>${date(r.at)}</span><span>${r.voided ? "已撤销" : "领取 1 份"}</span></div>`).join("") || '<p class="muted">本月尚无领取记录</p>'}</div></section></div>`;
+  const blocked = n >= 4 || me.weeklyBlocked;
+  const claimLabel =
+    n >= 4
+      ? "本月额度已用完"
+      : me.weeklyBlocked
+        ? "未到下次领取时间"
+        : "登记领取一份";
+  app.innerHTML = `<div class="grid"><section class="card hero"><div class="eyebrow">FRESH MOMENTS / 每月会员福利</div><h1>把新鲜，<br>带回日常。</h1><p>每月四份时令水果，<br>为生活添一点自然的甜。</p><span class="fruit">🍐🍊</span></section><section class="card"><div class="row"><h2>${esc(me.user.name)}，你好</h2><button id="logout">退出</button></div><span class="muted phone">${esc(me.user.phone)}</span><div class="quota"><div><strong>${n}</strong><small> / 4 份已领取</small></div><span class="pill ${n >= 4 ? "full" : ""}">${me.month} · ${n >= 4 ? "已领满" : `剩余 ${4 - n} 份`}</span></div><div class="dots">${Array.from({ length: 4 }, (_, i) => `<i class="${i < n ? "used" : ""}"></i>`).join("")}</div>${receipt ? `<div class="receipt" role="status"><h2>领取登记成功 ✓</h2><b>${esc(me.user.name)} · 1 份</b><p>${date(receipt.at)}</p><span class="small">凭证编号：${esc(receipt.id)}</span><p class="muted">请向现场工作人员出示本次凭证。</p></div>` : ""}<p id="error" class="error" role="alert" hidden></p><button id="claim" class="primary" ${blocked ? "disabled" : ""}>${claimLabel}</button><p class="muted">每月最多 4 份，两次领取至少间隔 7 天（跨月也适用）。到店领取时提交。${me.weeklyBlocked ? `<br><strong>下次可领取：${date(me.nextEligibleAt)}</strong>` : ""}</p><div class="history"><h2>本月领取记录</h2>${me.records.map((r) => `<div><span>${date(r.at)}</span><span>${r.voided ? "已撤销" : "领取 1 份"}</span></div>`).join("") || '<p class="muted">本月尚无领取记录</p>'}</div></section></div>`;
   bindLogout();
   document.querySelector("#claim").onclick = async (e) => {
-    if (!confirm("确认现在领取一份水果？提交后扣减一次本月额度。")) return;
+    if (
+      !requestId &&
+      !confirm("确认现在领取一份水果？提交后扣减一次本月额度。")
+    )
+      return;
     const button = e.target;
     button.disabled = true;
+    button.textContent = "正在登记，请勿重复提交…";
+    document.querySelector("#error").hidden = true;
     requestId = requestId || crypto.randomUUID();
     try {
       const result = await api("claim", { requestId });
@@ -228,10 +266,23 @@ function claimView() {
       claimView();
     } catch (e) {
       if (e.status && e.status < 500) requestId = null;
-      error(e);
-      if (e.status === 401) await boot();
+      error(
+        new Error(
+          e.status
+            ? e.message
+            : "网络响应较慢，暂未确认登记结果。请点击“重试确认领取结果”，不会重复扣次数。",
+        ),
+      );
+      if (e.status === 401 || e.status === 409) await boot();
     } finally {
-      button.disabled = me.count >= 4;
+      button.disabled = me.count >= 4 || me.weeklyBlocked;
+      button.textContent = requestId
+        ? "重试确认领取结果"
+        : me.count >= 4
+          ? "本月额度已用完"
+          : me.weeklyBlocked
+            ? "未到下次领取时间"
+            : "登记领取一份";
     }
   };
 }

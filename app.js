@@ -66,20 +66,24 @@ function requestHeaders(body) {
   return headers;
 }
 async function api(path, body) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 25000);
+  const controller =
+    typeof AbortController === "function" ? new AbortController() : null;
+  const timeout = controller
+    ? setTimeout(() => controller.abort(), 25000)
+    : null;
   let r, d;
   try {
-    r = await fetch(apiURL(path), {
-      signal: controller.signal,
+    const options = {
       method: body === undefined ? "GET" : "POST",
       credentials: window.FRUIT_CONFIG?.apiBase ? "omit" : "same-origin",
       headers: requestHeaders(body),
       body: body === undefined ? undefined : JSON.stringify(body),
-    });
+    };
+    if (controller) options.signal = controller.signal;
+    r = await fetch(apiURL(path), options);
     d = await r.json();
   } finally {
-    clearTimeout(timeout);
+    if (timeout) clearTimeout(timeout);
   }
   if (!r.ok) {
     if (r.status === 401 && path !== "login" && path !== "activate")
@@ -109,6 +113,18 @@ async function api(path, body) {
   }
   if (path === "logout") clearSession();
   return d;
+}
+function requestIdValue() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function")
+    return crypto.randomUUID();
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.getRandomValues === "function"
+  ) {
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  }
+  return Date.now().toString(36) + Math.random().toString(36).slice(2);
 }
 async function exportMonth() {
   try {
@@ -281,7 +297,7 @@ function claimView() {
     button.disabled = true;
     button.textContent = "正在登记，请勿重复提交…";
     document.querySelector("#error").hidden = true;
-    requestId = requestId || crypto.randomUUID();
+    requestId = requestId || requestIdValue();
     try {
       const result = await api("claim", { requestId });
       me = result;

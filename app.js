@@ -356,7 +356,7 @@ function tableView() {
   return `<div class="tablewrap"><table><thead><tr>${headings.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.join("")}</tbody></table>${rows.length ? "" : '<div class="empty">暂无符合条件的数据</div>'}</div>`;
 }
 function adminView() {
-  app.innerHTML = `<div class="row"><div><div class="eyebrow">MEMBER BENEFITS / 管理工作台</div><h1>水果领取概览</h1><p>${esc(me.user.name)} · 管理员</p></div><div class="topactions"><button id="manual">手动登记领取</button><button id="entry">复制领取链接</button><button id="qr">下载领取二维码</button><button id="export">导出本月 CSV ↓</button><button id="logout">退出</button></div></div><div id="manualPanel" class="card manual-panel" hidden><div class="row"><div><h2>手动登记领取</h2><p class="muted">适用于会员手机无法打开页面的情况。系统仍会校验每月 4 次和 7 天间隔。</p></div><button id="manualClose">关闭</button></div><label for="manualMember">选择会员</label><select id="manualMember">${data.members.map((m) => `<option value="${esc(m.id)}" ${!m.enabled ? "disabled" : ""}>${esc(m.name)} · ${esc(m.phone)} · ${m.count}/4 份${!m.enabled ? " · 已停用" : ""}</option>`).join("")}</select><p id="manualMessage" class="muted" role="status"></p><button id="manualSubmit" class="primary">确认登记领取一份</button></div><div class="stats">${[
+  app.innerHTML = `<div class="row"><div><div class="eyebrow">MEMBER BENEFITS / 管理工作台</div><h1>水果领取概览</h1><p>${esc(me.user.name)} · 管理员</p></div><div class="topactions"><button id="manual">手动登记领取</button><button id="entry">复制领取链接</button><button id="qr">下载领取二维码</button><button id="export">导出本月 CSV ↓</button><button id="logout">退出</button></div></div><div id="manualPanel" class="card manual-panel" hidden><div class="row"><div><h2>手动登记领取</h2><p class="muted">适用于会员手机无法打开页面的情况。系统仍会校验每月 4 次和 7 天间隔。</p></div><button id="manualClose">关闭</button></div><label for="manualMemberSearch">搜索会员姓名或手机号</label><input id="manualMemberSearch" type="search" placeholder="输入姓名或手机号筛选" autocomplete="off"><label for="manualMember">选择会员</label><select id="manualMember"></select><p id="manualMemberEmpty" class="muted" hidden>没有匹配的会员</p><p id="manualMessage" class="muted" role="status"></p><button id="manualSubmit" class="primary">确认登记领取一份</button></div><div class="stats">${[
     ["会员总数", data.members.length],
     ["本月领取份数", data.records.filter((r) => !r.voided).length],
     ["已领取会员", data.members.filter((m) => m.count > 0).length],
@@ -376,6 +376,28 @@ function adminView() {
   document.querySelector("#manualClose").onclick = () => {
     document.querySelector("#manualPanel").hidden = true;
   };
+  const manualMembers = data.members;
+  const manualSelect = document.querySelector("#manualMember");
+  const manualSearch = document.querySelector("#manualMemberSearch");
+  const manualEmpty = document.querySelector("#manualMemberEmpty");
+  const renderManualMembers = () => {
+    const query = manualSearch.value.trim().toLowerCase();
+    const previous = manualSelect.value;
+    const matches = manualMembers.filter((m) =>
+      `${m.name} ${m.phone}`.toLowerCase().includes(query),
+    );
+    manualSelect.innerHTML = matches
+      .map(
+        (m) =>
+          `<option value="${esc(m.id)}" ${!m.enabled ? "disabled" : ""}>${esc(m.name)} · ${esc(m.phone)} · ${m.count}/4 份${!m.enabled ? " · 已停用" : ""}</option>`,
+      )
+      .join("");
+    if (matches.some((m) => m.id === previous)) manualSelect.value = previous;
+    manualEmpty.hidden = matches.length !== 0;
+    manualSelect.hidden = matches.length === 0;
+  };
+  manualSearch.oninput = renderManualMembers;
+  renderManualMembers();
   document.querySelector("#manualSubmit").onclick = async (e) => {
     const memberId = document.querySelector("#manualMember").value;
     if (!memberId) return;

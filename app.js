@@ -340,7 +340,7 @@ function tableView() {
   const headings =
     tab === "members"
       ? ["会员", "手机号", "本月已领", "状态", "账号操作"]
-      : ["会员", "手机号", "领取时间", "状态", "操作"];
+      : ["会员", "手机号", "领取时间", "登记方式", "状态", "操作"];
   const rows =
     tab === "members"
       ? users.map(
@@ -351,12 +351,12 @@ function tableView() {
           .filter((r) => users.some((m) => m.id === r.member_id))
           .map(
             (r) =>
-              `<tr><td>${esc(r.name)}</td><td>${esc(r.phone)}</td><td>${date(r.at)}</td><td>${r.voided ? "已撤销" : "有效"}</td><td>${r.voided ? "—" : `<button data-revoke="${r.id}">撤销</button>`}</td></tr>`,
+              `<tr><td>${esc(r.name)}</td><td>${esc(r.phone)}</td><td>${date(r.at)}</td><td>${r.source === "admin" ? "管理员登记" : "会员扫码登记"}</td><td>${r.voided ? "已撤销" : "有效"}</td><td>${r.voided ? "—" : `<button data-revoke="${r.id}">撤销</button>`}</td></tr>`,
           );
   return `<div class="tablewrap"><table><thead><tr>${headings.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.join("")}</tbody></table>${rows.length ? "" : '<div class="empty">暂无符合条件的数据</div>'}</div>`;
 }
 function adminView() {
-  app.innerHTML = `<div class="row"><div><div class="eyebrow">MEMBER BENEFITS / 管理工作台</div><h1>水果领取概览</h1><p>${esc(me.user.name)} · 管理员</p></div><div class="topactions"><button id="entry">复制领取链接</button><button id="qr">下载领取二维码</button><button id="export">导出本月 CSV ↓</button><button id="logout">退出</button></div></div><div class="stats">${[
+  app.innerHTML = `<div class="row"><div><div class="eyebrow">MEMBER BENEFITS / 管理工作台</div><h1>水果领取概览</h1><p>${esc(me.user.name)} · 管理员</p></div><div class="topactions"><button id="manual">手动登记领取</button><button id="entry">复制领取链接</button><button id="qr">下载领取二维码</button><button id="export">导出本月 CSV ↓</button><button id="logout">退出</button></div></div><div id="manualPanel" class="card manual-panel" hidden><div class="row"><div><h2>手动登记领取</h2><p class="muted">适用于会员手机无法打开页面的情况。系统仍会校验每月 4 次和 7 天间隔。</p></div><button id="manualClose">关闭</button></div><label for="manualMember">选择会员</label><select id="manualMember">${data.members.map((m) => `<option value="${esc(m.id)}" ${!m.enabled ? "disabled" : ""}>${esc(m.name)} · ${esc(m.phone)} · ${m.count}/4 份${!m.enabled ? " · 已停用" : ""}</option>`).join("")}</select><p id="manualMessage" class="muted" role="status"></p><button id="manualSubmit" class="primary">确认登记领取一份</button></div><div class="stats">${[
     ["会员总数", data.members.length],
     ["本月领取份数", data.records.filter((r) => !r.voided).length],
     ["已领取会员", data.members.filter((m) => m.count > 0).length],
@@ -370,6 +370,34 @@ function adminView() {
       "",
     )}</div><section class="card"><details id="importDetails"><summary>＋ 给会员开通资格 / 批量导入</summary><p class="small"><strong>导入姓名和手机号后，该会员才有注册资格。</strong>系统会为每位新会员生成一个有效期 7 天的一次性激活码。激活码只在导入成功后显示一次，请立即点击“下载激活码 CSV”保存，再私下发给对应会员。</p><p class="small">每行“姓名,手机号”，最多 500 人；也可上传包含“姓名,手机号”表头的 CSV 文件。已有手机号会跳过，如需为已有会员生成新激活码，请在会员列表点击“重置激活码”。</p><label for="csvFile">上传 CSV 文件</label><input type="file" id="csvFile" accept=".csv,text/csv"><label for="imports">会员名单</label><textarea id="imports" placeholder="张三,13800138000&#10;李四,13900139000"></textarea><button id="import">导入并生成激活码</button></details><div id="codes"></div><p id="error" class="error" role="alert" hidden></p><div class="row"><div class="tabs"><button data-tab="members" class="${tab === "members" ? "active" : ""}">会员领取情况</button><button data-tab="records" class="${tab === "records" ? "active" : ""}">领取明细</button></div><input id="month" type="month" value="${month}" aria-label="统计月份" style="width:170px"></div><div class="toolbar"><input id="search" placeholder="搜索姓名或手机号" value="${esc(search)}"><select id="filter"><option value="all">全部会员</option><option value="full">已达上限</option><option value="available">仍有额度</option><option value="inactive">待激活</option></select><button id="refresh">刷新数据</button><button id="cleanup">清理历史月份</button></div><div id="results">${tableView()}</div><p class="muted">领取次数由服务端校验。撤销记录保留在导出文件中，统计时只计算有效记录。</p></section>`;
   bindLogout();
+  document.querySelector("#manual").onclick = () => {
+    document.querySelector("#manualPanel").hidden = false;
+  };
+  document.querySelector("#manualClose").onclick = () => {
+    document.querySelector("#manualPanel").hidden = true;
+  };
+  document.querySelector("#manualSubmit").onclick = async (e) => {
+    const memberId = document.querySelector("#manualMember").value;
+    if (!memberId) return;
+    if (
+      !confirm(
+        "确认代该会员登记领取一份？系统仍会检查 7 天间隔和每月 4 次上限。",
+      )
+    )
+      return;
+    e.target.disabled = true;
+    document.querySelector("#manualMessage").textContent = "正在登记，请稍候…";
+    try {
+      await api("admin/claim", { memberId, requestId: requestIdValue() });
+      document.querySelector("#manualMessage").textContent =
+        "登记成功，统计已更新。";
+      await boot();
+    } catch (err) {
+      document.querySelector("#manualMessage").textContent = err.message;
+    } finally {
+      e.target.disabled = false;
+    }
+  };
   document.querySelector("#filter").value = filter;
   document.querySelector("#filter").onchange = (e) => {
     filter = e.target.value;
